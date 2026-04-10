@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Asterisk Web Port</title>
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       font-family: Arial, Helvetica, sans-serif;
@@ -17,12 +21,14 @@
       align-items: center;
       padding: 18px;
     }
+
     .wrap {
       width: min(980px, 100%);
       display: grid;
       gap: 14px;
       justify-items: center;
     }
+
     .topbar {
       width: 100%;
       display: flex;
@@ -31,26 +37,32 @@
       justify-content: space-between;
       padding: 12px 16px;
       border-radius: 16px;
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.14);
       backdrop-filter: blur(8px);
     }
-    .hint { opacity: 0.85; }
+
+    .hint {
+      opacity: 0.85;
+    }
+
     canvas {
       width: min(920px, 100%);
       height: auto;
       border-radius: 18px;
-      border: 2px solid rgba(255,255,255,0.14);
-      box-shadow: 0 16px 45px rgba(0,0,0,0.35);
+      border: 2px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 16px 45px rgba(0, 0, 0, 0.35);
       background: #020611;
     }
+
     kbd {
-      background: rgba(255,255,255,0.12);
-      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.18);
       border-bottom-width: 3px;
       padding: 2px 7px;
       border-radius: 8px;
     }
+
     .footer {
       text-align: center;
       opacity: 0.88;
@@ -58,13 +70,14 @@
     }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <div class="topbar">
       <div id="scoreLine">Score: 0</div>
       <div id="levelLine">Level: 1</div>
       <div id="highLine">High Score: 0</div>
-      <div class="hint">Hold <kbd>Enter</kbd> to rise. Release to fall. Press <kbd>R</kbd> to restart.</div>
+      <div class="hint">Hold <kbd>Enter</kbd> to rise. Release to fall. Press <kbd>P</kbd> to pause. Press <kbd>R</kbd> to restart.</div>
     </div>
 
     <canvas id="game" width="920" height="540"></canvas>
@@ -88,7 +101,7 @@
     const HIGH_SCORE_KEY = 'asterisk_high_score_v4';
 
     const game = {
-      state: 'countdown', // countdown, running, gameover
+      state: 'countdown', // countdown, running, paused, gameover
       level: 1,
       score: 0,
       highScore: Number(localStorage.getItem(HIGH_SCORE_KEY) || 0),
@@ -323,6 +336,7 @@
         return;
       }
 
+      if (game.state === 'paused') return;
       if (game.state !== 'running') return;
 
       updatePlayer(dt);
@@ -440,6 +454,19 @@
         ctx.textAlign = 'left';
       }
 
+      if (game.state === 'paused') {
+        ctx.fillStyle = 'rgba(0,0,0,0.42)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#ffe680';
+        ctx.font = 'bold 58px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('PAUSED', W / 2, H / 2 - 10);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '22px Arial';
+        ctx.fillText('Press P to resume', W / 2, H / 2 + 34);
+        ctx.textAlign = 'left';
+      }
+
       if (game.state === 'gameover') {
         ctx.fillStyle = 'rgba(0,0,0,0.52)';
         ctx.fillRect(0, 0, W, H);
@@ -506,8 +533,8 @@
     // Teammate 3 can replace these stubs with their feature code.
     // Suggested feature: sound, bonus UI, or extra polish.
     // =========================
-    function feature3Update(dt) {}
-    function feature3Render(ctx) {}
+    function feature3Update(dt) { }
+    function feature3Render(ctx) { }
 
     let last = performance.now();
     function loop(now) {
@@ -523,8 +550,17 @@
         game.riseHeld = true;
         e.preventDefault();
       }
+
       if (e.key.toLowerCase() === 'r') {
         startGame(true);
+      }
+
+      if (e.key.toLowerCase() === 'p') {
+        if (game.state === 'running') {
+          game.state = 'paused';
+        } else if (game.state === 'paused') {
+          game.state = 'running';
+        }
       }
     });
 
@@ -541,4 +577,5 @@
     requestAnimationFrame(loop);
   </script>
 </body>
+
 </html>
