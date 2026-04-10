@@ -533,8 +533,55 @@
     // Teammate 3 can replace these stubs with their feature code.
     // Suggested feature: sound, bonus UI, or extra polish.
     // =========================
-    function feature3Update(dt) { }
-    function feature3Render(ctx) { }
+    let audioCtx = null;
+
+    function playBeep(freq, duration) {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        gain.gain.value = 0.03;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (err) {
+        // ignore audio errors
+      }
+    }
+
+    let lastSeenLevel = 1;
+    let lastSeenState = 'countdown';
+    let levelFlash = 0;
+
+    function feature3Update(dt) {
+      if (game.level !== lastSeenLevel) {
+        lastSeenLevel = game.level;
+        levelFlash = 0.35;
+        playBeep(880, 0.08);
+        playBeep(1175, 0.12);
+      }
+
+      if (game.state === 'gameover' && lastSeenState !== 'gameover') {
+        playBeep(180, 0.18);
+      }
+
+      lastSeenState = game.state;
+      levelFlash = Math.max(0, levelFlash - dt);
+    }
+
+    function feature3Render(ctx) {
+      if (levelFlash > 0) {
+        ctx.save();
+        ctx.fillStyle = `rgba(255,255,255,${levelFlash * 0.35})`;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+    }
 
     let last = performance.now();
     function loop(now) {
