@@ -18,7 +18,3 @@ This project is a browser-based, single-player port of the WinForms version of *
 - Countdown
 - Score and level display
 - Persistent high score with `localStorage`
-
-## Team workflow
-Feature 1 is the base port and setup.  
-Feature 2 and Feature 3 are designed to be pasted into the marked hook sections in `index.html` so each teammate can make a clean commit.
