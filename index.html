@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asterisk Web Port</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: radial-gradient(circle at top, #13255f 0%, #08142f 45%, #02050d 100%);
+      color: #f5f7ff;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 18px;
+    }
+    .wrap {
+      width: min(980px, 100%);
+      display: grid;
+      gap: 14px;
+      justify-items: center;
+    }
+    .topbar {
+      width: 100%;
+      display: flex;
+      gap: 10px 22px;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.14);
+      backdrop-filter: blur(8px);
+    }
+    .hint { opacity: 0.85; }
+    canvas {
+      width: min(920px, 100%);
+      height: auto;
+      border-radius: 18px;
+      border: 2px solid rgba(255,255,255,0.14);
+      box-shadow: 0 16px 45px rgba(0,0,0,0.35);
+      background: #020611;
+    }
+    kbd {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-bottom-width: 3px;
+      padding: 2px 7px;
+      border-radius: 8px;
+    }
+    .footer {
+      text-align: center;
+      opacity: 0.88;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div id="scoreLine">Score: 0</div>
+      <div id="levelLine">Level: 1</div>
+      <div id="highLine">High Score: 0</div>
+      <div class="hint">Hold <kbd>Enter</kbd> to rise. Release to fall. Press <kbd>R</kbd> to restart.</div>
+    </div>
+
+    <canvas id="game" width="920" height="540"></canvas>
+
+    <div class="footer">
+      Single-file browser port of Asterisk. Base port includes setup, gameplay, countdown, score, level display,
+      persistent high score, and teammate hook points for Feature 2 and Feature 3.
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const scoreLine = document.getElementById('scoreLine');
+    const levelLine = document.getElementById('levelLine');
+    const highLine = document.getElementById('highLine');
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const HIGH_SCORE_KEY = 'asterisk_high_score_v4';
+
+    const game = {
+      state: 'countdown', // countdown, running, gameover
+      level: 1,
+      score: 0,
+      highScore: Number(localStorage.getItem(HIGH_SCORE_KEY) || 0),
+      riseHeld: false,
+      countdownValue: 3,
+      countdownTimer: 0,
+      flash: 0,
+      stars: [],
+      time: 0
+    };
+
+    const player = {
+      x: 138,
+      y: 270,
+      size: 16,
+      vy: 0,
+      gravity: 980,
+      lift: -1500,
+      maxFall: 520,
+      trail: []
+    };
+
+    const world = {
+      x: 72,
+      y: 48,
+      rows: 18,
+      visibleCols: 30,
+      block: 24,
+      totalCols: 0,
+      cells: [],
+      scrollX: 0,
+      speed: 120,
+      exitCol: 0,
+      exitStartRow: 0,
+      exitRows: 0
+    };
+
+    function updateHud() {
+      if (game.score > game.highScore) {
+        game.highScore = game.score;
+        localStorage.setItem(HIGH_SCORE_KEY, String(game.highScore));
+      }
+      scoreLine.textContent = `Score: ${game.score}`;
+      levelLine.textContent = `Level: ${game.level}`;
+      highLine.textContent = `High Score: ${game.highScore}`;
+    }
+
+    function randInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+      return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
+
+    function makeStars() {
+      game.stars = Array.from({ length: 60 }, () => ({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 2 + 0.6,
+        speed: Math.random() * 25 + 10
+      }));
+    }
+
+    function buildLevel(level) {
+      world.totalCols = 44 + level * 5;
+      world.cells = Array.from({ length: world.rows }, () => Array(world.totalCols).fill(0));
+      world.scrollX = 0;
+      world.speed = 120 + (level - 1) * 20;
+      world.exitRows = Math.max(7 - Math.floor((level - 1) / 2), 4);
+      world.exitCol = world.totalCols - 1;
+      world.exitStartRow = randInt(2, world.rows - world.exitRows - 2);
+
+      const obstacleChance = Math.min(0.16 + level * 0.018, 0.34);
+
+      for (let c = 6; c < world.totalCols - 4; c++) {
+        for (let r = 0; r < world.rows - 1; r++) {
+          if (Math.random() >= obstacleChance) continue;
+          if (c + 1 >= world.totalCols || r + 1 >= world.rows) continue;
+
+          const spawnLaneProtected = c < 10 && r >= 6 && r <= 11;
+          const exitLaneProtected =
+            c > world.totalCols - 8 &&
+            r >= world.exitStartRow - 1 &&
+            r <= world.exitStartRow + world.exitRows;
+
+          if (spawnLaneProtected || exitLaneProtected) continue;
+
+          world.cells[r][c] = 1;
+          world.cells[r + 1][c] = 1;
+          world.cells[r][c + 1] = 1;
+          world.cells[r + 1][c + 1] = 1;
+        }
+      }
+
+      for (let r = 0; r < world.rows; r++) {
+        world.cells[r][world.exitCol] =
+          (r >= world.exitStartRow && r < world.exitStartRow + world.exitRows) ? 0 : 1;
+      }
+
+      player.y = world.y + world.block * 8;
+      player.vy = 0;
+      player.trail = [];
+    }
+
+    function startGame(resetEverything = true) {
+      if (resetEverything) {
+        game.level = 1;
+        game.score = 0;
+      }
+      game.state = 'countdown';
+      game.countdownValue = 3;
+      game.countdownTimer = 0;
+      game.flash = 0;
+      buildLevel(game.level);
+      updateHud();
+    }
+
+    function gameOver() {
+      game.state = 'gameover';
+      game.flash = 1;
+      updateHud();
+    }
+
+    function nextLevel() {
+      game.level += 1;
+      game.score += 100;
+      game.state = 'countdown';
+      game.countdownValue = 3;
+      game.countdownTimer = 0;
+      buildLevel(game.level);
+      updateHud();
+    }
+
+    function updateStars(dt) {
+      for (const s of game.stars) {
+        s.x -= (s.speed + world.speed * 0.08) * dt;
+        if (s.x < -4) {
+          s.x = W + Math.random() * 50;
+          s.y = Math.random() * H;
+        }
+      }
+    }
+
+    function updatePlayer(dt) {
+      if (game.riseHeld) player.vy += player.lift * dt;
+      else player.vy += player.gravity * dt;
+
+      player.vy = Math.max(-360, Math.min(player.maxFall, player.vy));
+      player.y += player.vy * dt;
+
+      player.trail.push({
+        x: player.x + player.size / 2,
+        y: player.y + player.size / 2,
+        life: 0.55
+      });
+
+      for (const t of player.trail) t.life -= dt;
+      player.trail = player.trail.filter(t => t.life > 0);
+    }
+
+    function updateWorld(dt) {
+      world.scrollX += world.speed * dt;
+    }
+
+    function checkBounds() {
+      const top = world.y;
+      const bottom = world.y + world.rows * world.block;
+      if (player.y < top || player.y + player.size > bottom) {
+        gameOver();
+        return true;
+      }
+      return false;
+    }
+
+    function checkObstacleCollision() {
+      const viewRight = world.x + world.visibleCols * world.block;
+      for (let r = 0; r < world.rows; r++) {
+        for (let c = 0; c < world.totalCols; c++) {
+          if (!world.cells[r][c]) continue;
+
+          const x = world.x + c * world.block - world.scrollX;
+          const y = world.y + r * world.block;
+
+          if (x + world.block < world.x - 8 || x > viewRight + 8) continue;
+
+          if (rectsOverlap(player.x, player.y, player.size, player.size, x, y, world.block, world.block)) {
+            gameOver();
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function checkExit() {
+      const exitLeft = world.x + world.exitCol * world.block - world.scrollX;
+      const exitRight = exitLeft + world.block;
+      const gapTop = world.y + world.exitStartRow * world.block;
+      const gapBottom = gapTop + world.exitRows * world.block;
+
+      const touchingExitColumn = player.x + player.size >= exitLeft && player.x <= exitRight;
+      if (touchingExitColumn) {
+        const withinGap = player.y >= gapTop && player.y + player.size <= gapBottom;
+        if (withinGap) {
+          nextLevel();
+          return true;
+        }
+      }
+
+      if (exitRight < player.x) {
+        gameOver();
+        return true;
+      }
+
+      return false;
+    }
+
+    function update(dt) {
+      game.time += dt;
+      game.flash = Math.max(0, game.flash - dt * 1.8);
+
+      updateStars(dt);
+
+      if (game.state === 'countdown') {
+        game.countdownTimer += dt;
+        if (game.countdownTimer >= 1) {
+          game.countdownValue -= 1;
+          game.countdownTimer = 0;
+          if (game.countdownValue <= 0) game.state = 'running';
+        }
+        return;
+      }
+
+      if (game.state !== 'running') return;
+
+      updatePlayer(dt);
+      updateWorld(dt);
+      game.score += Math.floor(16 * dt * game.level);
+
+      if (checkBounds()) return;
+      if (checkObstacleCollision()) return;
+      if (checkExit()) return;
+
+      feature2Update(dt);
+      feature3Update(dt);
+
+      updateHud();
+    }
+
+    function drawRoundedRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function renderBackground() {
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, `rgba(${20 + game.level * 8}, ${30 + game.level * 4}, 74, 1)`);
+      grad.addColorStop(1, 'rgba(3, 6, 18, 1)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      for (const s of game.stars) {
+        ctx.globalAlpha = 0.3 + s.r / 3;
+        ctx.fillStyle = '#dff6ff';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function renderPlayfield() {
+      const fieldW = world.visibleCols * world.block;
+      const fieldH = world.rows * world.block;
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+      ctx.lineWidth = 2;
+      drawRoundedRect(world.x - 10, world.y - 10, fieldW + 20, fieldH + 20, 16);
+      ctx.stroke();
+
+      ctx.fillStyle = 'rgba(255,255,255,0.03)';
+      drawRoundedRect(world.x - 10, world.y - 10, fieldW + 20, fieldH + 20, 16);
+      ctx.fill();
+
+      const exitX = world.x + world.exitCol * world.block - world.scrollX;
+      const gapTop = world.y + world.exitStartRow * world.block;
+      const gapHeight = world.exitRows * world.block;
+
+      if (exitX + world.block > world.x - 30 && exitX < world.x + fieldW + 30) {
+        ctx.fillStyle = 'rgba(126, 231, 255, 0.18)';
+        ctx.fillRect(exitX, gapTop, world.block, gapHeight);
+        ctx.strokeStyle = 'rgba(126, 231, 255, 0.7)';
+        ctx.strokeRect(exitX, gapTop, world.block, gapHeight);
+      }
+
+      for (let r = 0; r < world.rows; r++) {
+        for (let c = 0; c < world.totalCols; c++) {
+          if (!world.cells[r][c]) continue;
+          const x = world.x + c * world.block - world.scrollX;
+          const y = world.y + r * world.block;
+
+          if (x + world.block < world.x - 4 || x > world.x + fieldW + 4) continue;
+
+          const glow = 0.08 + 0.03 * Math.sin((c + r) * 0.45 + game.time * 6);
+          ctx.fillStyle = `rgba(255,255,255,${0.82 + glow})`;
+          ctx.fillRect(x, y, world.block - 1, world.block - 1);
+        }
+      }
+    }
+
+    function renderPlayer() {
+      for (const t of player.trail) {
+        ctx.globalAlpha = t.life;
+        ctx.fillStyle = '#7ee7ff';
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 7 * t.life, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = '#7ee7ff';
+      ctx.fillStyle = '#7ee7ff';
+      ctx.fillRect(player.x, player.y, player.size, player.size);
+      ctx.shadowBlur = 0;
+    }
+
+    function renderOverlay() {
+      ctx.fillStyle = '#f5f7ff';
+      ctx.font = 'bold 22px Arial';
+      ctx.fillText(`Level ${game.level}`, 24, 34);
+
+      if (game.state === 'countdown') {
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#ffe680';
+        ctx.font = 'bold 88px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(game.countdownValue), W / 2, H / 2 + 20);
+        ctx.font = '24px Arial';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Get ready', W / 2, H / 2 + 70);
+        ctx.textAlign = 'left';
+      }
+
+      if (game.state === 'gameover') {
+        ctx.fillStyle = 'rgba(0,0,0,0.52)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#ff9e9e';
+        ctx.font = 'bold 62px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', W / 2, H / 2 - 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px Arial';
+        ctx.fillText(`Final Score: ${game.score}`, W / 2, H / 2 + 24);
+        ctx.fillText('Press R to restart', W / 2, H / 2 + 62);
+        ctx.textAlign = 'left';
+      }
+
+      if (game.flash > 0) {
+        ctx.fillStyle = `rgba(255, 80, 80, ${game.flash * 0.33})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    function render() {
+      renderBackground();
+      renderPlayfield();
+      feature2Render(ctx);
+      renderPlayer();
+      feature3Render(ctx);
+      renderOverlay();
+    }
+
+    // =========================
+    // FEATURE 2 PASTE AREA
+    // Teammate 2 can replace these stubs with their feature code.
+    // Suggested feature: color themes / particles / visual effects.
+    // =========================
+    function feature2Update(dt) {}
+    function feature2Render(ctx) {}
+
+    // =========================
+    // FEATURE 3 PASTE AREA
+    // Teammate 3 can replace these stubs with their feature code.
+    // Suggested feature: sound, bonus UI, or extra polish.
+    // =========================
+    function feature3Update(dt) {}
+    function feature3Render(ctx) {}
+
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        game.riseHeld = true;
+        e.preventDefault();
+      }
+      if (e.key.toLowerCase() === 'r') {
+        startGame(true);
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') {
+        game.riseHeld = false;
+        e.preventDefault();
+      }
+    });
+
+    makeStars();
+    startGame(true);
+    updateHud();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
