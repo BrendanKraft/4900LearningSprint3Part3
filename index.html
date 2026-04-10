@@ -471,11 +471,35 @@
 
     // =========================
     // FEATURE 2 PASTE AREA
-    // Teammate 2 can replace these stubs with their feature code.
-    // Suggested feature: color themes / particles / visual effects.
     // =========================
-    function feature2Update(dt) {}
-    function feature2Render(ctx) {}
+    function feature2Update(dt) {
+      // nothing needed yet, but left here so teammate can expand easily
+    }
+
+    function feature2Render(ctx) {
+      const pulse = 0.12 + 0.08 * Math.sin(game.time * 2.8);
+      ctx.save();
+      ctx.globalAlpha = 0.08 + pulse;
+      const grad = ctx.createRadialGradient(
+        player.x + player.size / 2,
+        player.y + player.size / 2,
+        8,
+        player.x + player.size / 2,
+        player.y + player.size / 2,
+        120
+      );
+      grad.addColorStop(0, 'rgba(126,231,255,0.8)');
+      grad.addColorStop(1, 'rgba(126,231,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(player.x + player.size / 2, player.y + player.size / 2, 120, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 0.09;
+      ctx.fillStyle = game.level % 2 === 0 ? '#8b5cf6' : '#22d3ee';
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
 
     // =========================
     // FEATURE 3 PASTE AREA
